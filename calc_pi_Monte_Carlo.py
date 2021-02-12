@@ -3,6 +3,242 @@ from random import randint
 from math import pi
 
 
+class CanvasTemplate:
+    font = 'Comic Sans MS', 15
+
+    def __init__(self, width, height, bg='#2B2B2B', fg='#AFB9BA'):
+        self.canvas = Canvas(width=width, height=height, bg=bg)
+        self.width = width
+        self.height = height
+        self.bg = bg
+        self.fg = fg
+        self.canvas_ids = {}
+        self.draw()
+
+    def delete_group(self, group_name):
+        for canvas_id in self.canvas_ids.get(group_name, []):
+            self.canvas.delete(canvas_id)
+        self.canvas_ids[group_name] = []
+        self.canvas.delete(group_name)
+
+    def clear(self):
+        for group_name in self.canvas_ids:
+            self.delete_group(group_name)
+        self.canvas.delete('for clear')
+
+    def convert_canvas_to_decart(self, coords):
+        return coords[0] + self.center[0], self.center[1] - coords[1]
+
+    def draw(self):
+        raise NotImplementedError
+
+    def update(self):
+        raise NotImplementedError
+
+    @property
+    def center(self):
+        return self.width / 2, self.height / 2
+
+
+class Chart(CanvasTemplate):
+    pi_line_color = '#499C54'
+    upper_text_color = '#648658'
+
+    chart_line_opts = {
+        'fill': '#4096C1',
+        'width': 4
+    }
+
+    error = 1
+    amount = 0
+    amount_in = 0
+    calc_pi = 0
+
+    chart_line = None
+
+    def __init__(self, width, height):
+        super().__init__(width, height)
+        self.chart_step = width / 10
+
+    def __draw_pi_line(self):
+        """
+        Отрисовка линии, которая соответствует точному значению числа pi.
+        """
+        self.delete_group('pi line')
+        self.canvas_ids['pi line'] = [self.canvas.create_line(0, self.center[1],
+                                                              self.width, self.center[1],
+                                                              fill=self.pi_line_color,
+                                                              tags=('pi line',))]
+
+    def __draw_upper_text(self):
+        self.delete_group('upper text')
+
+        self.canvas_ids['upper text'].append(self.canvas.create_text(
+            self.center[0], self.height / 5, text=f'Истинное 𝝅 = {pi}',
+            fill=self.upper_text_color, tags=('upper text',), font=self.font
+        ))
+        self.canvas_ids['upper text'].append(self.canvas.create_text(
+            self.center[0], self.height / 5 + self.font[1], text=f'Погрешность = {self.error}%',
+            fill=self.upper_text_color, tags=('upper text',), font=self.font
+        ))
+
+    def __draw_footer_text(self):
+        self.delete_group('footer text')
+
+        self.canvas_ids['footer text'].append(self.canvas.create_text(
+            self.center[0], self.height * 4 / 5, text=f'Общее количество точек: {self.amount}',
+            fill=self.fg, tags=('footer text',), font=self.font
+        ))
+        self.canvas_ids['footer text'].append(self.canvas.create_text(
+            self.center[0], self.height * 4 / 5 - self.font[1], text=f'Точки в круге: {self.amount_in}',
+            fill=self.fg, tags=('footer text',), font=self.font
+        ))
+
+    def __draw_chart(self):
+        self.canvas.delete(self.chart_line)
+        self.chart_line = self.canvas.create_line(0, 0, 0, 0, **self.chart_line_opts)
+
+    def __update_chart_line(self):
+        self.canvas.coords(self.chart_line, *self.__get_chart_line_coords(self.canvas.coords(self.chart_line)))
+
+    def __get_chart_line_coords(self, old_coords):
+        if old_coords[-2] + self.chart_step > self.width * 9 / 10:
+            self.__scale_chart()
+            self.chart_step /= 2
+
+        old_coords.append(old_coords[-2] + self.chart_step)
+        old_coords.append(self.center[1] - (self.height / (2 * pi)) * self.calc_pi)
+
+        return old_coords
+
+    def __scale_chart(self):
+        self.canvas.coords(self.chart_line, *(coord / 2 if no % 2 == 0 else coord
+                                              for no, coord in enumerate(self.canvas.coords(self.chart_line))))
+
+    def draw(self):
+        self.__draw_pi_line()
+        self.__draw_upper_text()
+        self.__draw_footer_text()
+
+    def update(self):
+        self.__draw_footer_text()
+        self.__draw_upper_text()
+
+
+class Tab(CanvasTemplate):
+    columns = 'Кол-во точек', 'Число pi', 'Погрешность'
+
+    data = []
+
+    def __draw_grid(self):
+        self.delete_group('grid')
+
+        for width in range(0, self.width, self.column_width):
+            line = self.canvas.create_line((width, 0), (width, self.height),
+                                           fill=self.fg, tags=('grid',))
+            self.canvas_ids['grid'].append(line)
+
+        for height in range(0, self.height, self.column_height):
+            line = self.canvas.create_line((self.width, height), (self.width, height),
+                                           fill=self.fg, tags=('grid',))
+            self.canvas_ids['grid'].append(line)
+
+    def __draw_header(self):
+        self.delete_group('header')
+
+        self.canvas_ids['header'] = [
+            self.canvas.create_text(self.column_width * no + self.column_width / 2, self.column_height / 2,
+                                    text=cell, font=self.font, fill=self.fg)
+            for no, cell in enumerate(self.columns)]
+
+    def insert_data(self, data):
+        data = list(data)
+        if len(data) != len(self.columns):
+            raise IndexError('data len must be equal to number of columns')
+
+        row = len(self.canvas_ids['data']) // len(self.columns)
+        self.canvas_ids['data'] += [
+            self.canvas.create_text(self.column_width * no + self.column_width / 2,
+                                    self.column_height * row + self.column_height / 2,
+                                    text=str(cell), fill=self.fg, tags=('data',), font=self.font)
+            for no, cell in enumerate(data)
+        ]
+
+    def draw(self):
+        self.__draw_grid()
+        self.__draw_header()
+
+    def update(self):
+        pass
+
+    @property
+    def column_height(self):
+        return self.font[1] * 2
+
+    @property
+    def column_width(self):
+        return int(self.width / len(self.columns))
+
+
+class Quarter(CanvasTemplate):
+    quarter_options = {
+        'start': 0,
+        'extent': -90,
+        'width': 2,
+        'outline': 'gray',
+        'fill': '#3C3F41',
+        'tags': ('quarter',)
+    }
+
+    points_options = {
+        'radius': 3,
+        'width': 0,
+    }
+
+    points_fill = '#ECBB06'
+    points_in_quarter_fill = '#4096C1'
+
+    points_limit = 500
+    points_per_step = 10
+
+    amount_of_points = 0
+    amount_of_points_in = 0
+
+    def __draw_quarter(self):
+        self.delete_group('quarter')
+
+        self.canvas_ids['quarter'] = [self.canvas.create_arc(0, 0, self.width, self.height, **self.quarter_options)]
+
+    def __draw_point(self, xy, radius, **options):
+        x, y = xy
+        self.canvas_ids['points'].append(self.canvas.create_rectangle(x - radius, y - radius, x + radius, y + radius,
+                                                                      tags=('points',), **options))
+        if len(self.canvas_ids['points']) > self.points_limit:
+            self.canvas.delete(self.canvas_ids['points'].pop(0))
+
+    def __point_in_quarter(self, xy):
+        x, y = xy
+        return True if x ** 2 + y ** 2 <= self.width else False
+
+    def draw_points(self):
+        for point_no in range(self.points_per_step):
+            xy = randint(0, self.width), randint(0, self.height)
+            if self.__point_in_quarter(xy):
+                fill = self.points_in_quarter_fill
+                self.amount_of_points_in += 1
+            else:
+                fill = self.points_fill
+            self.__draw_point(xy, fill=fill, **self.points_options)
+            self.amount_of_points += 1
+
+    def draw(self):
+        self.__draw_quarter()
+        self.draw_points()
+
+    def update(self):
+        self.draw_points()
+
+
 class RandomPoints:
     points_options = {
         'fill': 'lime',
